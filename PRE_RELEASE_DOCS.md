@@ -20,6 +20,26 @@ Do not store raw diffs or line-number-only instructions here; prefer stable sect
 
 ## Unreleased
 
+### Async `transformRequest` callbacks
+
+- **Change:** Request body transformers may return promises, which Axios resolves in order before sending the request.
+- **Source:** [Issue #10713](https://github.com/axios/axios/issues/10713).
+- **Status:** Pending.
+- **Docs targets:** `README.md` Request Config `transformRequest` and the English, Spanish, French, and Chinese `docs/pages/advanced/request-config.md` sections.
+- **Required content:** Clarify that only request transformers may return a Promise; the next request transformer receives the resolved value, and the adapter starts after all transforms complete. Rejected transformations prevent the request from being sent. Existing synchronous callbacks remain synchronous; `transformResponse` behavior is unchanged. Requests cancelled through `AbortSignal` or `CancelToken` while an asynchronous transformer is running reject promptly with `ERR_CANCELED`, without waiting for the transformer to finish. A positive `timeout` also limits this transformation stage using Axios's usual `ECONNABORTED` or `ETIMEDOUT` (with `transitional.clarifyTimeoutError`) error and the configured timeout message. A monotonic deadline is checked before queued transformations and adapter dispatch, including when a blocking transformer delays the timeout callback. Later transformers and the adapter are skipped after cancellation or a timeout; the underlying transformer itself may still continue, so pass cancellation into long-running transformers where possible. The adapter uses its existing timeout independently after successful transformations (not a single end-to-end request deadline).
+- **Examples:** A per-request `async (data, headers) => { headers.set('X-Signature', await sign(data)); return data; }` transformer followed by `...axios.defaults.transformRequest` to preserve default serialization.
+- **Notes:** TypeScript `AxiosRequestTransformer` already returns `any` in both ESM and CJS declarations, so no public type change is needed.
+
+### `getUri` rejects a nullish url
+
+- **Change:** `getUri` throws `AxiosError` with `ERR_INVALID_URL` for a `null` or `undefined` url without `baseURL` when the adapter is a built-in one, the same configs a request rejects.
+- **Source:** [PR #11453](https://github.com/axios/axios/pull/11453).
+- **Status:** Pending.
+- **Docs targets:** The `getUri` section of `docs/pages/advanced/request-method-aliases.md` and its Spanish, French, and Chinese translations; the `getUri` mention in the README; the upgrade guide for the release that ships this.
+- **Required content:** Say that `getUri` throws `ERR_INVALID_URL` when the url is `null` or `undefined` and no `baseURL` is set, unless a custom adapter or a `socketPath` on the Node HTTP adapter supplies the destination, and that an empty-string url is still accepted. The adapter is resolved first in that case, so an unknown adapter name or one unavailable in the current environment (such as `xhr` in Node) fails with the same adapter error a request gets, such as `ERR_NOT_SUPPORT`, instead of `ERR_INVALID_URL`. Replace the claim that `getUri` returns "the same string axios would put on the wire": it applies `baseURL`, `params`, `paramsSerializer`, and the url check, but does not run request interceptors, so a url, params, or `baseURL` set by an interceptor is not reflected and a url that only an interceptor supplies makes `getUri` throw. In the upgrade guide, note that `getUri({ params })` without a url previously returned a query-only string such as `?foo=bar` and `getUri()` with no url or `baseURL` returned `undefined`; callers that relied on either should pass `url: ''` or set `baseURL`.
+- **Examples:** `axios.getUri({ params: { q: 1 } })` throws; `axios.getUri({ url: '', params: { q: 1 } })` returns `'?q=1'`.
+- **Notes:** None.
+
 ### Response duration clock
 
 - **Change:** `response.duration` uses `performance.now()` instead of `Date.now()`.
@@ -119,3 +139,12 @@ Do not store raw diffs or line-number-only instructions here; prefer stable sect
 - **Docs targets:** `README.md` AxiosHeaders Shortcuts, `docs/pages/advanced/header-methods.md` Shortcuts, and the Spanish, French, and Chinese translations.
 - **Required content:** Keep the `setContentEncoding`, `getContentEncoding`, `hasContentEncoding` entries, which now match the runtime. Add `setAcceptEncoding`, `getAcceptEncoding`, `hasAcceptEncoding`; add the existing `Authorization` shortcuts (`setAuthorization`, `getAuthorization`, `hasAuthorization`); and mention `getSetCookie()` in the methods list, since none of these appear in the shortcut lists today.
 - **Notes:** Release-time documentation only; the runtime and type changes ship with the PR. Translations use their own section headings and may need localized wording.
+
+### Fetch capability probe cleanup
+
+- **Change:** The fetch adapter now cancels the throwaway body it reads while probing for response-stream support.
+- **Source:** [PR #11241](https://github.com/axios/axios/pull/11241); `PRE_RELEASE_CHANGELOG.md` Bug Fixes, Fetch adapter - capability probe cleanup.
+- **Status:** Pending.
+- **Docs targets:** `docs/pages/advanced/fetch-adapter.md`, the custom `env.Response` paragraph about stream bodies.
+- **Required content:** One sentence: when axios builds the adapter it reads `new Response('').body` from `env.Response` once to detect stream support and then calls `cancel()` on that body, so a custom `Response` should return a fresh body per instance; a missing or failing `cancel()` is ignored and does not change detected support.
+- **Notes:** Internal behavior only; no API, option, or type change and no migration.
